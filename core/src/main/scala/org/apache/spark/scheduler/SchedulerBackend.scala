@@ -17,6 +17,8 @@
 
 package org.apache.spark.scheduler
 
+import java.util
+
 /**
  * A backend interface for scheduling systems that allows plugging in different ones under
  * TaskSchedulerImpl. We assume a Mesos-like model where the application gets resource offers as
@@ -56,4 +58,5 @@ private[spark] trait SchedulerBackend {
    */
   def getDriverLogUrls: Option[Map[String, String]] = None
 
+  def getExecutorIPs: util.HashSet[String] = null
 }

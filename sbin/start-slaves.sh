@@ -58,4 +58,4 @@ if [ "$START_TACHYON" == "true" ]; then
 fi
 
 # Launch the slaves
-"${SPARK_HOME}/sbin/slaves.sh" cd "${SPARK_HOME}" \; "${SPARK_HOME}/sbin/start-slave.sh" "spark://$SPARK_MASTER_IP:$SPARK_MASTER_PORT"
+"${SPARK_HOME}/sbin/slaves.sh" cd "${SPARK_HOME}" \; "taskset" "0x03c" "${SPARK_HOME}/sbin/start-slave.sh" "spark://$SPARK_MASTER_IP:$SPARK_MASTER_PORT"

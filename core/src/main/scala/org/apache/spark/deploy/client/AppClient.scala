@@ -17,6 +17,7 @@
 
 package org.apache.spark.deploy.client
 
+import java.util
 import java.util.concurrent._
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import java.util.concurrent.{Future => JFuture, ScheduledFuture => JScheduledFuture}
@@ -44,6 +45,8 @@ private[spark] class AppClient(
     listener: AppClientListener,
     conf: SparkConf)
   extends Logging {
+
+  private val executorIPs = new util.HashSet[String]()
 
   private val masterRpcAddresses = masterUrls.map(RpcAddress.fromSparkURL(_))
 
@@ -176,6 +179,11 @@ private[spark] class AppClient(
         val fullId = appId + "/" + id
         logInfo("Executor added: %s on %s (%s) with %d cores".format(fullId, workerId, hostPort,
           cores))
+        val host = hostPort.substring(0, hostPort.indexOf(':'))
+        logInfo(host)
+        if (!executorIPs.contains(host)){
+          executorIPs.add(host)
+        }
         listener.executorAdded(fullId, workerId, hostPort, cores, memory)
 
       case ExecutorUpdated(id, state, message, exitStatus) =>
@@ -324,4 +332,7 @@ private[spark] class AppClient(
     }
   }
 
+  def getExecutorIPs: util.HashSet[String] = {
+    executorIPs
+  }
 }

@@ -80,6 +80,7 @@ private[spark] class StaticMemoryManager(
     val maxNumBytesToFree = math.max(0, maxUnrollMemory - currentUnrollMemory - freeMemory)
     // Keep it within the range 0 <= X <= maxNumBytesToFree
     val numBytesToFree = math.max(0, math.min(maxNumBytesToFree, numBytes - freeMemory))
+    logDebug("[BOLD] calling acquireMemory")
     storageMemoryPool.acquireMemory(blockId, numBytes, numBytesToFree, evictedBlocks)
   }
 

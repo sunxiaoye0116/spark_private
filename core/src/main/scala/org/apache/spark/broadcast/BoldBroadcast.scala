@@ -21,10 +21,11 @@ import java.io._
 import java.net.{URI, URL, URLConnection}
 import java.util.concurrent.TimeUnit
 
+import org.apache.spark._
+import org.apache.spark.bold.network.broadcast._
 import org.apache.spark.io.CompressionCodec
-import org.apache.spark.storage.{BroadcastBlockId, StorageLevel}
-import org.apache.spark.util.{MetadataCleaner, MetadataCleanerType, TimeStampedHashSet, Utils}
-import org.apache.spark.{HttpServer, Logging, SecurityManager, SparkConf, SparkEnv}
+import org.apache.spark.storage.{BlockManager, BroadcastBlockId, StorageLevel}
+import org.apache.spark.util._
 
 import scala.reflect.ClassTag
 
@@ -36,7 +37,7 @@ import scala.reflect.ClassTag
   * executor to speed up future accesses.
   */
 
-private[spark] class HttpBroadcast[T: ClassTag](
+private[spark] class BoldBroadcast[T: ClassTag](
   @transient var value_ : T, isLocal: Boolean, id: Long)
   extends Broadcast[T](id) with Logging with Serializable {
   logDebug("[BOLD] HttpBroadcast is created" + id)
@@ -53,7 +54,7 @@ private[spark] class HttpBroadcast[T: ClassTag](
    * Broadcasted data is also stored in the BlockManager of the driver. The BlockManagerMaster
    * does not need to be told about this block as not only need to know about this data block.
    */
-  HttpBroadcast.synchronized {
+  BoldBroadcast.synchronized {
     logDebug("[BOLD] putSingle")
     SparkEnv.get.blockManager.putSingle(
       blockId, value_, StorageLevel.MEMORY_AND_DISK, tellMaster = false)
@@ -61,7 +62,7 @@ private[spark] class HttpBroadcast[T: ClassTag](
 
   if (!isLocal) {
     logDebug("[BOLD] !isLocal")
-    HttpBroadcast.write(id, value_)
+    BoldBroadcast.write(id, value_)
   }
 
   /**
@@ -69,7 +70,7 @@ private[spark] class HttpBroadcast[T: ClassTag](
     */
   override protected def doUnpersist(blocking: Boolean) {
     logInfo("doUnpersist is called" + id)
-    HttpBroadcast.unpersist(id, removeFromDriver = false, blocking)
+    BoldBroadcast.unpersist(id, removeFromDriver = false, blocking)
   }
 
   /**
@@ -77,7 +78,7 @@ private[spark] class HttpBroadcast[T: ClassTag](
     */
   override protected def doDestroy(blocking: Boolean) {
     logInfo("doDestroy is called" + id)
-    HttpBroadcast.unpersist(id, removeFromDriver = true, blocking)
+    BoldBroadcast.unpersist(id, removeFromDriver = true, blocking)
   }
 
   /** Used by the JVM when serializing this object. */
@@ -92,13 +93,13 @@ private[spark] class HttpBroadcast[T: ClassTag](
   private def readObject(in: ObjectInputStream): Unit = Utils.tryOrIOException {
     logDebug("[BOLD] readObject() is called")
     in.defaultReadObject()
-    HttpBroadcast.synchronized {
+    BoldBroadcast.synchronized {
       SparkEnv.get.blockManager.getSingle(blockId) match {
         case Some(x) => value_ = x.asInstanceOf[T]
         case None => {
           logInfo("Started reading broadcast variable " + id)
           val start = System.nanoTime
-          value_ = HttpBroadcast.read[T](id)
+          value_ = BoldBroadcast.read[T](id)
           val timeRead = (System.nanoTime - start) / 1e6
           logInfo(this.getClass.getSimpleName + ".read() variable " + id + " took " + timeRead + " ms")
           /*
@@ -117,14 +118,21 @@ private[spark] class HttpBroadcast[T: ClassTag](
 }
 
 
-private[broadcast] object HttpBroadcast extends Logging {
+/*
+  Major difference between Http and Bold is at the Object
+ */
+private[broadcast] object BoldBroadcast extends Logging {
   private var initialized = false
   private var broadcastDir: File = null
   private var compress: Boolean = false
   private var bufferSize: Int = 65536
   private var serverUri: String = null
+  private var broadcastDirPath: String = null
+  private var socketFile: String = null
   private var server: HttpServer = null
   private var securityManager: SecurityManager = null
+  private var blockManager: BlockManager = null
+  private var boldManager: BoldManager = null
 
   // TODO: This shouldn't be a global variable so that multiple SparkContexts can coexist
   private val files = new TimeStampedHashSet[File]
@@ -132,18 +140,47 @@ private[broadcast] object HttpBroadcast extends Logging {
   private var compressionCodec: CompressionCodec = null
   private var cleaner: MetadataCleaner = null
 
-  def initialize(isDriver: Boolean, conf: SparkConf, securityMgr: SecurityManager) {
+  def getServerUri: String = {
+    serverUri
+  }
+
+  def getBroadcastDir: String = {
+    broadcastDirPath
+  }
+
+  def getUDSFile: String = {
+    socketFile
+  }
+
+  def initialize(isDriver: Boolean, conf: SparkConf, securityMgr: SecurityManager, blockMgr: BlockManager) {
     synchronized {
-      logDebug("[BOLD] initialize is called")
       if (!initialized) {
         bufferSize = conf.getInt("spark.buffer.size", 65536)
         compress = conf.getBoolean("spark.broadcast.compress", true)
         securityManager = securityMgr
+        blockManager = blockMgr
         if (isDriver) {
+          logDebug("[BOLD] initialized() called at driver")
           createServer(conf)
-          conf.set("spark.httpBroadcast.uri", serverUri)
+          conf.set("spark.boldBroadcast.uri", serverUri)
+          conf.set("spark.boldBroadcast.broadcastDir", broadcastDirPath)
+          conf.set("spark.boldBroadcast.socketFile", "/home/bold/domain_socket_file")
+        } else {
+          // register the broadcast folder at worker
+          // so that the fold can be removed after app finishes
+          ShutdownHookManager.registerShutdownDeleteDir(
+            new File(conf.get("spark.boldBroadcast.broadcastDir")))
         }
-        serverUri = conf.get("spark.httpBroadcast.uri")
+        serverUri = conf.get("spark.boldBroadcast.uri")
+        broadcastDirPath = conf.get("spark.boldBroadcast.broadcastDir")
+        socketFile = conf.get("spark.boldBroadcast.socketFile")
+
+        boldManager = new BoldManager(isDriver, conf) //, blockManager)
+        boldManager.initialize()
+        blockManager.setBoldManager(boldManager)
+        //        boldManager.init()
+
+        // TODO: should have a cleaner for BoldBroadcast as well...
         cleaner = new MetadataCleaner(MetadataCleanerType.HTTP_BROADCAST, cleanup, conf)
         compressionCodec = CompressionCodec.createCodec(conf)
         initialized = true
@@ -161,23 +198,45 @@ private[broadcast] object HttpBroadcast extends Logging {
         cleaner.cancel()
         cleaner = null
       }
+      if (boldManager != null) {
+        boldManager.stop()
+        boldManager = null
+      }
       compressionCodec = null
       initialized = false
     }
   }
 
   private def createServer(conf: SparkConf) {
-//    logError(Utils.getLocalDir(conf))
+    //    broadcastDir = Utils.createTempDir(Utils.getLocalDir(conf), "broadcast")
     broadcastDir = Utils.createTempDir("/mnt/ramdisk/", "broadcast")
-//    broadcastDir = Utils.createTempDir(Utils.getLocalDir(conf), "broadcast")
     logInfo("broadcastDir: " + broadcastDir)
+    broadcastDirPath = broadcastDir.getAbsolutePath + "/"
     val broadcastPort = conf.getInt("spark.broadcast.port", 0)
     server =
       new HttpServer(conf, broadcastDir, securityManager, broadcastPort, "HTTP broadcast server")
     server.start()
+    //    serverUri = server.uri
     serverUri = server.uri
+    //    s"${Utils.localHostNameForURI()}"
     logInfo("Broadcast server started at " + serverUri)
+    logInfo("[BOLD] Broadcast server started at " + serverUri + "/" + broadcastDirPath)
   }
+
+//  private def createServer_wo_Http(conf: SparkConf) {
+//    // TODO: register to the broadcast master to multicast agent
+//    // TODO: directory should comes from a conf
+//    serverUri = s"${Utils.localHostNameForURI()}"
+//    broadcastDir = Utils.createTempDir("/mnt/ramdisk/", "broadcast")
+//    broadcastDirPath = broadcastDir.getAbsolutePath + "/"
+//    //    val broadcastPort = conf.getInt("spark.broadcast.port", 0)
+//    //    server =
+//    //      new HttpServer(conf, broadcastDir, securityManager,
+//    // broadcastPort, "HTTP broadcast server")
+//    //    server.start()
+//    //    serverUri = server.uri
+//    logInfo("[BOLD] Broadcast server started at " + serverUri + ":" + broadcastDirPath)
+//  }
 
   def getFile(id: Long): File = new File(broadcastDir, BroadcastBlockId(id).name)
 
@@ -185,7 +244,7 @@ private[broadcast] object HttpBroadcast extends Logging {
     val file = getFile(id)
     val fileOutputStream = new FileOutputStream(file)
     Utils.tryWithSafeFinally {
-      logDebug("[BOLD] file.getName(): " + file.getName + " broadcastDir: " + broadcastDir)
+      logDebug("[BOLD] file.getName(): " + file.getName + " broadcastDirPath: " + broadcastDirPath)
       val out: OutputStream = {
         if (compress) {
           logDebug("[BOLD] compress")
@@ -212,33 +271,50 @@ private[broadcast] object HttpBroadcast extends Logging {
       fileOutputStream.close()
     }
     logDebug("[BOLD] file size: " + file.length())
+    // Republic apecific: start
+    logDebug("[BOLD] call agent.add()")
+    boldManager.add(id, file.length())
+    logDebug("[BOLD] return from agent.add()")
+
+    if (file.length() > 1 * 1024 * 1024) {
+      logDebug("[BOLD] large data, call agent.push()")
+      boldManager.push(id, 0)
+      logDebug("[BOLD] return from agent.push()")
+    }
+    // Republic apecific: end
     logDebug("[BOLD] return from write()")
   }
 
   private def read[T: ClassTag](id: Long): T = {
     logInfo("[BOLD] read() is called. serverUri: " + serverUri + ", id: " + id)
-
-    val url = serverUri + "/" + BroadcastBlockId(id).name
-    logInfo("[Bold] url: " + url)
-    var uc: URLConnection = null
-
-    if (securityManager.isAuthenticationEnabled()) {
-      logDebug("broadcast security enabled")
-      val newuri = Utils.constructURIForAuthentication(new URI(url), securityManager)
-      uc = newuri.toURL.openConnection()
-      uc.setConnectTimeout(httpReadTimeout)
-      uc.setAllowUserInteraction(false)
-    } else {
-      logDebug("broadcast security disabled")
-      uc = new URL(url).openConnection()
-      uc.setConnectTimeout(httpReadTimeout)
-    }
-    Utils.setupSecureURLConnection(uc, securityManager)
-
-    logDebug("create InputStream for broadcast-" + id)
+    logInfo("create InputStream for broadcast-" + id)
     val in = {
-      uc.setReadTimeout(httpReadTimeout)
-      val inputStream = uc.getInputStream
+      logInfo("[BOLD] start reading data from master " + "(ip: " + serverUri + ":" +
+        broadcastDirPath + BroadcastBlockId(id).name + ")")
+      var inputStream: InputStream = boldManager.read(id, 5)
+      logInfo("[BOLD] finish reading data")
+      if (inputStream == null) {
+
+        val url = serverUri + "/" + BroadcastBlockId(id).name
+        logInfo("[Bold] url: " + url)
+        var uc: URLConnection = null
+
+        if (securityManager.isAuthenticationEnabled()) {
+          logDebug("broadcast security enabled")
+          val newuri = Utils.constructURIForAuthentication(new URI(url), securityManager)
+          uc = newuri.toURL.openConnection()
+          uc.setConnectTimeout(httpReadTimeout)
+          uc.setAllowUserInteraction(false)
+        } else {
+          logDebug("broadcast security disabled")
+          uc = new URL(url).openConnection()
+          uc.setConnectTimeout(httpReadTimeout)
+        }
+        Utils.setupSecureURLConnection(uc, securityManager)
+
+        uc.setReadTimeout(httpReadTimeout)
+        inputStream = uc.getInputStream
+      }
       if (compress) {
         compressionCodec.compressedInputStream(inputStream)
       } else {

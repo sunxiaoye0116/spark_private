@@ -17,17 +17,18 @@
 
 package org.apache.spark.scheduler.cluster
 
+import java.util
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
-import scala.collection.mutable.{ArrayBuffer, HashMap, HashSet}
-
 import org.apache.spark.rpc._
-import org.apache.spark.{ExecutorAllocationClient, Logging, SparkEnv, SparkException, TaskState}
 import org.apache.spark.scheduler._
 import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages._
 import org.apache.spark.scheduler.cluster.CoarseGrainedSchedulerBackend.ENDPOINT_NAME
-import org.apache.spark.util.{ThreadUtils, SerializableBuffer, AkkaUtils, Utils}
+import org.apache.spark.util.{AkkaUtils, SerializableBuffer, ThreadUtils, Utils}
+import org.apache.spark.{ExecutorAllocationClient, Logging, SparkEnv, SparkException, TaskState}
+
+import scala.collection.mutable.{ArrayBuffer, HashMap, HashSet}
 
 /**
  * A scheduler backend that waits for coarse grained executors to connect to it through Akka.
@@ -506,6 +507,20 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
    */
   protected def doKillExecutors(executorIds: Seq[String]): Boolean = false
 
+  override def getExecutorIPs: util.HashSet[String] = {
+    val ret = new util.HashSet[String]()
+    logInfo("[BOLD] len " + executorDataMap.size)
+    for ((executorID, executorData) <- executorDataMap) {
+      logInfo("" + executorID)
+      //      logInfo("" + executorData.executorAddress) // null
+      //      logInfo("" + executorData.executorEndpoint.address) // null
+      logInfo("" + executorData.executorHost)
+      logInfo("" + executorData.executorEndpoint)
+    }
+    executorDataMap.values.foreach(v => ret.add(v.executorHost))
+    logInfo("" + ret)
+    ret
+  }
 }
 
 private[spark] object CoarseGrainedSchedulerBackend {

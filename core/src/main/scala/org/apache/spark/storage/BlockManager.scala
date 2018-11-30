@@ -25,10 +25,9 @@ import scala.concurrent.duration._
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.util.Random
 import scala.util.control.NonFatal
-
 import sun.nio.ch.DirectBuffer
-
 import org.apache.spark._
+import org.apache.spark.bold.network.broadcast.BoldManager
 import org.apache.spark.executor.{DataReadMethod, ShuffleWriteMetrics}
 import org.apache.spark.io.CompressionCodec
 import org.apache.spark.memory.MemoryManager
@@ -164,6 +163,8 @@ private[spark] class BlockManager(
    * loaded yet. */
   private lazy val compressionCodec: CompressionCodec = CompressionCodec.createCodec(conf)
 
+
+  private var boldManager: BoldManager = null
   /**
    * Initializes the BlockManager with the given appId. This is not performed in the constructor as
    * the appId may not be known at BlockManager instantiation time (in particular for the driver,
@@ -174,11 +175,18 @@ private[spark] class BlockManager(
    * service if configured.
    */
   def initialize(appId: String): Unit = {
+    logDebug("BlockManager initialize is called")
     blockTransferService.init(this)
     shuffleClient.init(appId)
 
     blockManagerId = BlockManagerId(
       executorId, blockTransferService.hostName, blockTransferService.port)
+
+    // [BOLD] init BoldManager
+    if (boldManager != null) {
+      logDebug("[Bold] init BoldManager (A BoldManager instance has already been created)")
+      boldManager.init(appId, executorId)
+    }
 
     shuffleServerId = if (externalShuffleServiceEnabled) {
       logInfo(s"external shuffle service port = $externalShuffleServicePort")
@@ -793,6 +801,7 @@ private[spark] class BlockManager(
         }
 
         // Actually put the values
+        logDebug("[BOLD] put() data " + blockId)
         val result = data match {
           case IteratorValues(iterator) =>
             blockStore.putIterator(blockId, iterator, putLevel, returnValues)
@@ -811,6 +820,7 @@ private[spark] class BlockManager(
 
         // Keep track of which blocks are dropped from memory
         if (putLevel.useMemory) {
+          logDebug("[BOLD] droppedBlocks()")
           result.droppedBlocks.foreach { updatedBlocks += _ }
         }
 
@@ -1080,7 +1090,8 @@ private[spark] class BlockManager(
 
   /**
    * Remove all blocks belonging to the given RDD.
-   * @return The number of blocks removed.
+    *
+    * @return The number of blocks removed.
    */
   def removeRdd(rddId: Int): Int = {
     // TODO: Avoid a linear scan by creating another mapping of RDD.id to blocks.
@@ -1095,10 +1106,18 @@ private[spark] class BlockManager(
    */
   def removeBroadcast(broadcastId: Long, tellMaster: Boolean): Int = {
     logDebug(s"Removing broadcast $broadcastId")
+
+    if (boldManager != null) {
+      logDebug("[Bold] call boldManager remove" + broadcastId)
+      assert(boldManager.hasInitialized)
+      boldManager.remove(broadcastId)
+    }
+
     val blocksToRemove = blockInfo.keys.collect {
       case bid @ BroadcastBlockId(`broadcastId`, _) => bid
     }
     blocksToRemove.foreach { blockId => removeBlock(blockId, tellMaster) }
+
     blocksToRemove.size
   }
 
@@ -1241,7 +1260,16 @@ private[spark] class BlockManager(
     metadataCleaner.cancel()
     broadcastCleaner.cancel()
     futureExecutionContext.shutdownNow()
+
     logInfo("BlockManager stopped")
+  }
+
+  def setBoldManager(boldMgr: BoldManager): Unit = {
+    boldManager = boldMgr
+  }
+
+  def getBoldManager: BoldManager = {
+    boldManager
   }
 }
 

@@ -61,6 +61,8 @@ class BlockManagerSlaveEndpoint(
       }
 
     case RemoveBroadcast(broadcastId, _) =>
+      // TODO: should talk to broadcast agent and remove the data there
+      logDebug("RemoveBroadcast is called")
       doAsync[Int]("removing broadcast " + broadcastId, context) {
         blockManager.removeBroadcast(broadcastId, tellMaster = true)
       }

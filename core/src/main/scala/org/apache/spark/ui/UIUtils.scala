@@ -49,19 +49,19 @@ private[spark] object UIUtils extends Logging {
     }
     val seconds = milliseconds.toDouble / 1000
     if (seconds < 1) {
-      return "%.1f s".format(seconds)
+      return "%.3f s".format(seconds)
     }
     if (seconds < 60) {
-      return "%.0f s".format(seconds)
+      return "%.2f s".format(seconds)
     }
     val minutes = seconds / 60
     if (minutes < 10) {
-      return "%.1f min".format(minutes)
+      return "%.3f min".format(minutes)
     } else if (minutes < 60) {
-      return "%.0f min".format(minutes)
+      return "%.2f min".format(minutes)
     }
     val hours = minutes / 60
-    "%.1f h".format(hours)
+    "%.3f h".format(hours)
   }
 
   /** Generate a verbose human-readable string representing a duration such as "5 second 35 ms" */

@@ -28,7 +28,7 @@ object BroadcastTest {
 
     val bcName = if (args.length > 2) args(2) else "Http"
     val blockSize = if (args.length > 3) args(3) else "4096"
-
+    println(bcName)
     val sparkConf = new SparkConf().setAppName("Broadcast Test")
       .set("spark.broadcast.factory", s"org.apache.spark.broadcast.${bcName}BroadcastFactory")
       .set("spark.broadcast.blockSize", blockSize)
@@ -39,14 +39,16 @@ object BroadcastTest {
 
     val arr1 = (0 until num).toArray
 
-    for (i <- 0 until 3) {
+    for (i <- 0 until args(4).toInt) {
       println("Iteration " + i)
       println("===========")
       val startTime = System.nanoTime
       val barr1 = sc.broadcast(arr1)
-      val observedSizes = sc.parallelize(1 to 10, slices).map(_ => barr1.value.size)
+      println(startTime)
+      val observedSizes = sc.parallelize(1 to slices, slices).map(_ => barr1.value.size)
       // Collect the small RDD so we can print the observed sizes locally.
       observedSizes.collect().foreach(i => println(i))
+      barr1.destroy()
       println("Iteration %d took %.0f milliseconds".format(i, (System.nanoTime - startTime) / 1E6))
     }
 

@@ -66,6 +66,7 @@ abstract class Broadcast[T: ClassTag](val id: Long) extends Serializable with Lo
 
   /** Get the broadcasted value. */
   def value: T = {
+    // logDebug("[BOLD] value is called")
     assertValid()
     getValue()
   }

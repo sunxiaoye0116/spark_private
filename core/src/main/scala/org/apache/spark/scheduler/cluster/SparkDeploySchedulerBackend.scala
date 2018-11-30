@@ -17,6 +17,7 @@
 
 package org.apache.spark.scheduler.cluster
 
+import java.util
 import java.util.concurrent.Semaphore
 
 import org.apache.spark.rpc.RpcAddress
@@ -205,6 +206,10 @@ private[spark] class SparkDeploySchedulerBackend(
       launcherBackend.setState(finalState)
       launcherBackend.close()
     }
+  }
+
+  override def getExecutorIPs: util.HashSet[String] = {
+    client.getExecutorIPs
   }
 
 }

@@ -86,6 +86,7 @@ private[memory] class StorageMemoryPool(lock: Object) extends MemoryPool(lock) w
     assert(numBytesToFree >= 0)
     assert(memoryUsed <= poolSize)
     if (numBytesToFree > 0) {
+      logDebug("[BOLD] acquireMemory() is called")
       memoryStore.evictBlocksToFreeSpace(Some(blockId), numBytesToFree, evictedBlocks)
       // Register evicted blocks, if any, with the active task metrics
       Option(TaskContext.get()).foreach { tc =>
@@ -130,6 +131,7 @@ private[memory] class StorageMemoryPool(lock: Object) extends MemoryPool(lock) w
     if (remainingSpaceToFree > 0) {
       // If reclaiming free memory did not adequately shrink the pool, begin evicting blocks:
       val evictedBlocks = new ArrayBuffer[(BlockId, BlockStatus)]
+      logDebug("[BOLD] shrinkPoolToFreeSpace() is called ")
       memoryStore.evictBlocksToFreeSpace(None, remainingSpaceToFree, evictedBlocks)
       val spaceFreedByEviction = evictedBlocks.map(_._2.memSize).sum
       // When a block is released, BlockManager.dropFromMemory() calls releaseMemory(), so we do

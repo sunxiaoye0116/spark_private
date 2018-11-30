@@ -18,10 +18,10 @@
 package org.apache.spark.broadcast
 
 import scala.reflect.ClassTag
-
 import org.apache.spark.SecurityManager
 import org.apache.spark.SparkConf
 import org.apache.spark.annotation.DeveloperApi
+import org.apache.spark.storage.BlockManager
 
 /**
  * :: DeveloperApi ::
@@ -33,7 +33,8 @@ import org.apache.spark.annotation.DeveloperApi
 @DeveloperApi
 trait BroadcastFactory {
 
-  def initialize(isDriver: Boolean, conf: SparkConf, securityMgr: SecurityManager): Unit
+  def initialize(isDriver: Boolean, conf: SparkConf, securityMgr: SecurityManager,
+                 blockMgr: BlockManager): Unit
 
   /**
    * Creates a new broadcast variable.

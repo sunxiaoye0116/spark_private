@@ -20,14 +20,15 @@ package org.apache.spark.broadcast
 import java.util.concurrent.atomic.AtomicLong
 
 import scala.reflect.ClassTag
-
 import org.apache.spark._
+import org.apache.spark.storage.BlockManager
 import org.apache.spark.util.Utils
 
 private[spark] class BroadcastManager(
     val isDriver: Boolean,
     conf: SparkConf,
-    securityManager: SecurityManager)
+    securityManager: SecurityManager,
+    blockManager: BlockManager = null)
   extends Logging {
 
   private var initialized = false
@@ -39,6 +40,7 @@ private[spark] class BroadcastManager(
   private def initialize() {
     synchronized {
       if (!initialized) {
+        logDebug("[bold] BroadcastManager initialize is called")
         val broadcastFactoryClass =
           conf.get("spark.broadcast.factory", "org.apache.spark.broadcast.TorrentBroadcastFactory")
 
@@ -46,7 +48,7 @@ private[spark] class BroadcastManager(
           Utils.classForName(broadcastFactoryClass).newInstance.asInstanceOf[BroadcastFactory]
 
         // Initialize appropriate BroadcastFactory and BroadcastObject
-        broadcastFactory.initialize(isDriver, conf, securityManager)
+        broadcastFactory.initialize(isDriver, conf, securityManager, blockManager)
 
         initialized = true
       }

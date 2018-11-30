@@ -23,30 +23,32 @@ import org.apache.spark.{Logging, SecurityManager, SparkConf}
 import scala.reflect.ClassTag
 
 /**
- * A [[org.apache.spark.broadcast.BroadcastFactory]] implementation that uses a
- * HTTP server as the broadcast mechanism. Refer to
- * [[org.apache.spark.broadcast.HttpBroadcast]] for more details about this mechanism.
- */
-class HttpBroadcastFactory extends BroadcastFactory with Logging {
+  * A [[org.apache.spark.broadcast.BroadcastFactory]] implementation that uses a
+  * Netmap server as the broadcast mechanism. Refer to
+  * [[org.apache.spark.broadcast.BoldBroadcast]] for more details about this mechanism.
+  */
+class BoldBroadcastFactory extends BroadcastFactory with Logging {
   override def initialize(isDriver: Boolean, conf: SparkConf, securityMgr: SecurityManager,
                           blockMgr: BlockManager) {
     logDebug("[BOLD] initialize is called")
-    HttpBroadcast.initialize(isDriver, conf, securityMgr)
+    BoldBroadcast.initialize(isDriver, conf, securityMgr, blockMgr)
   }
 
   override def newBroadcast[T: ClassTag](value_ : T, isLocal: Boolean, id: Long): Broadcast[T] = {
     logDebug("[BOLD] newBroadcast is called")
-    new HttpBroadcast[T](value_, isLocal, id)
+    new BoldBroadcast[T](value_, isLocal, id)
   }
 
-  override def stop() { HttpBroadcast.stop() }
+
+  override def stop() { BoldBroadcast.stop() }
 
   /**
-   * Remove all persisted state associated with the HTTP broadcast with the given ID.
-   * @param removeFromDriver Whether to remove state from the driver
-   * @param blocking Whether to block until unbroadcasted
-   */
+    * Remove all persisted state associated with the HTTP broadcast with the given ID.
+ *
+    * @param removeFromDriver Whether to remove state from the driver
+    * @param blocking Whether to block until unbroadcasted
+    */
   override def unbroadcast(id: Long, removeFromDriver: Boolean, blocking: Boolean) {
-    HttpBroadcast.unpersist(id, removeFromDriver, blocking)
+    BoldBroadcast.unpersist(id, removeFromDriver, blocking)
   }
 }

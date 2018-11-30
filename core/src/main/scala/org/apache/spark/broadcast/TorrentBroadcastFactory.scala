@@ -17,20 +17,25 @@
 
 package org.apache.spark.broadcast
 
-import scala.reflect.ClassTag
+import org.apache.spark.storage.BlockManager
 
-import org.apache.spark.{SecurityManager, SparkConf}
+import scala.reflect.ClassTag
+import org.apache.spark.{Logging, SecurityManager, SparkConf}
 
 /**
  * A [[org.apache.spark.broadcast.Broadcast]] implementation that uses a BitTorrent-like
  * protocol to do a distributed transfer of the broadcasted data to the executors. Refer to
  * [[org.apache.spark.broadcast.TorrentBroadcast]] for more details.
  */
-class TorrentBroadcastFactory extends BroadcastFactory {
+class TorrentBroadcastFactory extends BroadcastFactory with Logging {
 
-  override def initialize(isDriver: Boolean, conf: SparkConf, securityMgr: SecurityManager) { }
+  override def initialize(isDriver: Boolean, conf: SparkConf, securityMgr: SecurityManager,
+                          blockMgr: BlockManager) {
+    logDebug("[BOLD] initialize is called")
+  }
 
   override def newBroadcast[T: ClassTag](value_ : T, isLocal: Boolean, id: Long): Broadcast[T] = {
+    logDebug("[BOLD] newBroadcast is called")
     new TorrentBroadcast[T](value_, id)
   }
 

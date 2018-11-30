@@ -535,6 +535,12 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
     _ui.foreach(_.setAppId(_applicationId))
     _env.blockManager.initialize(_applicationId)
 
+    // Bold
+    if (_env.blockManager.getBoldManager != null) {
+      logInfo("[BOLD] schedulerBackend is set " + _schedulerBackend)
+      _env.blockManager.getBoldManager.setSchedulerBackend(_schedulerBackend)
+    }
+
     // The metrics system for Driver need to be set spark.app.id to app ID.
     // So it should start after we get app ID from the task scheduler and set spark.app.id.
     metricsSystem.start()
@@ -1323,6 +1329,7 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
       logWarning("Can not directly broadcast RDDs; instead, call collect() and "
         + "broadcast the result (see SPARK-5063)")
     }
+    logDebug("[bold] calling newBroadcast")
     val bc = env.broadcastManager.newBroadcast[T](value, isLocal)
     val callSite = getCallSite
     logInfo("Created broadcast " + bc.id + " from " + callSite.shortForm)

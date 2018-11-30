@@ -54,7 +54,7 @@ import org.apache.spark.util.io.ByteArrayChunkOutputStream
  */
 private[spark] class TorrentBroadcast[T: ClassTag](obj: T, id: Long)
   extends Broadcast[T](id) with Logging with Serializable {
-
+  logDebug("[BOLD] TorrentBroadcast is created")
   /**
    * Value of the broadcast object on executors. This is reconstructed by [[readBroadcastBlock]],
    * which builds this value by reading blocks from the driver and/or other executors.
@@ -67,7 +67,7 @@ private[spark] class TorrentBroadcast[T: ClassTag](obj: T, id: Long)
   @transient private var compressionCodec: Option[CompressionCodec] = _
   /** Size of each block. Default value is 4MB.  This value is only read by the broadcaster. */
   @transient private var blockSize: Int = _
-
+//  Random.setSeed(5L)
   private def setConf(conf: SparkConf) {
     compressionCodec = if (conf.getBoolean("spark.broadcast.compress", true)) {
       Some(CompressionCodec.createCodec(conf))
@@ -85,6 +85,7 @@ private[spark] class TorrentBroadcast[T: ClassTag](obj: T, id: Long)
   private val numBlocks: Int = writeBlocks(obj)
 
   override protected def getValue() = {
+//    logDebug("[BOLD] getValue is called")
     _value
   }
 
@@ -94,6 +95,7 @@ private[spark] class TorrentBroadcast[T: ClassTag](obj: T, id: Long)
    * @return number of blocks this broadcast variable is divided into
    */
   private def writeBlocks(value: T): Int = {
+    logDebug("[BOLD] writeBlocks is called")
     // Store a copy of the broadcast variable in the driver so that tasks run on the driver
     // do not create a duplicate copy of the broadcast variable's value.
     SparkEnv.get.blockManager.putSingle(broadcastId, value, StorageLevel.MEMORY_AND_DISK,
@@ -112,6 +114,7 @@ private[spark] class TorrentBroadcast[T: ClassTag](obj: T, id: Long)
 
   /** Fetch torrent blocks from the driver and/or other executors. */
   private def readBlocks(): Array[ByteBuffer] = {
+    logDebug("[BOLD] readBlocks is called")
     // Fetch chunks of data. Note that all these chunks are stored in the BlockManager and reported
     // to the driver, so other executors can pull these chunks from this executor as well.
     val blocks = new Array[ByteBuffer](numBlocks)
@@ -158,11 +161,13 @@ private[spark] class TorrentBroadcast[T: ClassTag](obj: T, id: Long)
 
   /** Used by the JVM when serializing this object. */
   private def writeObject(out: ObjectOutputStream): Unit = Utils.tryOrIOException {
+    logDebug("[BOLD] writeObject is called")
     assertValid()
     out.defaultWriteObject()
   }
 
   private def readBroadcastBlock(): T = Utils.tryOrIOException {
+    logDebug("[BOLD] readBroadcastBlock() is called")
     TorrentBroadcast.synchronized {
       setConf(SparkEnv.get.conf)
       SparkEnv.get.blockManager.getLocal(broadcastId).map(_.data.next()) match {
@@ -171,12 +176,19 @@ private[spark] class TorrentBroadcast[T: ClassTag](obj: T, id: Long)
 
         case None =>
           logInfo("Started reading broadcast variable " + id)
+          val start = System.nanoTime
           val startTimeMs = System.currentTimeMillis()
           val blocks = readBlocks()
           logInfo("Reading broadcast variable " + id + " took" + Utils.getUsedTimeMs(startTimeMs))
+          val startDeser = System.nanoTime
 
           val obj = TorrentBroadcast.unBlockifyObject[T](
             blocks, SparkEnv.get.serializer, compressionCodec)
+          val timeTorrentRead = (System.nanoTime - start) / 1e6
+          logInfo(this.getClass.getSimpleName + ".read() variable " + id + " took " + timeTorrentRead + " ms")
+          val timeTorrentDeser = (System.nanoTime - startDeser) / 1e6
+          logInfo("De-serializing broadcast variable " + id + " took " + timeTorrentDeser + " ms")
+
           // Store the merged copy in BlockManager so other tasks on this executor don't
           // need to re-fetch it.
           SparkEnv.get.blockManager.putSingle(

@@ -89,6 +89,7 @@ private[spark] class MemoryStore(blockManager: BlockManager, memoryManager: Memo
 
   override def putBytes(blockId: BlockId, _bytes: ByteBuffer, level: StorageLevel): PutResult = {
     // Work on a duplicate - since the original input might be used elsewhere.
+    logDebug("[BOLD] putBytes in MemoryStore")
     val bytes = _bytes.duplicate()
     bytes.rewind()
     if (level.deserialized) {
@@ -127,12 +128,15 @@ private[spark] class MemoryStore(blockManager: BlockManager, memoryManager: Memo
       values: Array[Any],
       level: StorageLevel,
       returnValues: Boolean): PutResult = {
+    logDebug("[BOLD] putArray in MemoryStore")
     val droppedBlocks = new ArrayBuffer[(BlockId, BlockStatus)]
-    if (level.deserialized) {
+    if (level.deserialized) { // broadcast
+      logDebug("[BOLD] deser")
       val sizeEstimate = SizeEstimator.estimate(values.asInstanceOf[AnyRef])
       tryToPut(blockId, values, sizeEstimate, deserialized = true, droppedBlocks)
       PutResult(sizeEstimate, Left(values.iterator), droppedBlocks)
     } else {
+      logDebug("[BOLD] ser")
       val bytes = blockManager.dataSerialize(blockId, values.iterator)
       tryToPut(blockId, bytes, bytes.limit, deserialized = false, droppedBlocks)
       PutResult(bytes.limit(), Right(bytes.duplicate()), droppedBlocks)
@@ -144,7 +148,8 @@ private[spark] class MemoryStore(blockManager: BlockManager, memoryManager: Memo
       values: Iterator[Any],
       level: StorageLevel,
       returnValues: Boolean): PutResult = {
-    putIterator(blockId, values, level, returnValues, allowPersistToDisk = true)
+    logDebug("[BOLD] putIterator(short) in MemoryStore")
+    putIterator(blockId, values, level, returnValues, allowPersistToDisk = true) // broadcast
   }
 
   /**
@@ -165,12 +170,15 @@ private[spark] class MemoryStore(blockManager: BlockManager, memoryManager: Memo
       level: StorageLevel,
       returnValues: Boolean,
       allowPersistToDisk: Boolean): PutResult = {
+    logDebug("[BOLD] putIterator in MemoryStore")
     val droppedBlocks = new ArrayBuffer[(BlockId, BlockStatus)]
+    logDebug("[BOLD] calling unrollSafely")
     val unrolledValues = unrollSafely(blockId, values, droppedBlocks)
     unrolledValues match {
-      case Left(arrayValues) =>
+      case Left(arrayValues) => // broadcast
         // Values are fully unrolled in memory, so store them as an array
-        val res = putArray(blockId, arrayValues, level, returnValues)
+        logDebug("[BOLD] calling putArray")
+        val res = putArray(blockId, arrayValues, level, returnValues) // broadcast
         droppedBlocks ++= res.droppedBlocks
         PutResult(res.size, res.data, droppedBlocks)
       case Right(iteratorValues) =>
@@ -251,7 +259,7 @@ private[spark] class MemoryStore(blockManager: BlockManager, memoryManager: Memo
       values: Iterator[Any],
       droppedBlocks: ArrayBuffer[(BlockId, BlockStatus)])
     : Either[Array[Any], Iterator[Any]] = {
-
+    logDebug("[BOLD] unrollSafely in MemoryStore")
     // Number of elements unrolled so far
     var elementsUnrolled = 0
     // Whether there is still enough memory for us to continue unrolling this block
@@ -270,6 +278,7 @@ private[spark] class MemoryStore(blockManager: BlockManager, memoryManager: Memo
     var vector = new SizeTrackingVector[Any]
 
     // Request enough memory to begin unrolling
+    logDebug("[BOLD] calling 1st reserveUnrollMemoryForThisTask")
     keepUnrolling = reserveUnrollMemoryForThisTask(blockId, initialMemoryThreshold, droppedBlocks)
 
     if (!keepUnrolling) {
@@ -288,6 +297,7 @@ private[spark] class MemoryStore(blockManager: BlockManager, memoryManager: Memo
           val currentSize = vector.estimateSize()
           if (currentSize >= memoryThreshold) {
             val amountToRequest = (currentSize * memoryGrowthFactor - memoryThreshold).toLong
+            logDebug("[BOLD] calling 2nd reserveUnrollMemoryForThisTask")
             keepUnrolling = reserveUnrollMemoryForThisTask(
               blockId, amountToRequest, droppedBlocks)
             if (keepUnrolling) {
@@ -385,8 +395,9 @@ private[spark] class MemoryStore(blockManager: BlockManager, memoryManager: Memo
       // synchronized on the same lock.
       releasePendingUnrollMemoryForThisTask()
       val enoughMemory = memoryManager.acquireStorageMemory(blockId, size, droppedBlocks)
-      if (enoughMemory) {
+      if (enoughMemory) { // broadcast
         // We acquired enough memory for the block, so go ahead and put it
+        logDebug("[BOLD] enoughMemory")
         val entry = new MemoryEntry(value(), size, deserialized)
         entries.synchronized {
           entries.put(blockId, entry)
@@ -395,6 +406,7 @@ private[spark] class MemoryStore(blockManager: BlockManager, memoryManager: Memo
         logInfo("Block %s stored as %s in memory (estimated size %s, free %s)".format(
           blockId, valuesOrBytes, Utils.bytesToString(size), Utils.bytesToString(blocksMemoryUsed)))
       } else {
+        logDebug("[BOLD] no enoughMemory")
         // Tell the block manager that we couldn't put it in memory so that it can drop it to
         // disk if the block allows disk storage.
         lazy val data = if (deserialized) {
@@ -490,6 +502,7 @@ private[spark] class MemoryStore(blockManager: BlockManager, memoryManager: Memo
       memory: Long,
       droppedBlocks: mutable.Buffer[(BlockId, BlockStatus)]): Boolean = {
     memoryManager.synchronized {
+      logDebug("[BOLD] reserveUnrollMemoryForThisTask() is called")
       val success = memoryManager.acquireUnrollMemory(blockId, memory, droppedBlocks)
       if (success) {
         val taskAttemptId = currentTaskAttemptId()

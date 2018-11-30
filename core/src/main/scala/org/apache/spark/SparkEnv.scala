@@ -22,10 +22,8 @@ import java.net.Socket
 
 import scala.collection.mutable
 import scala.util.Properties
-
 import akka.actor.ActorSystem
 import com.google.common.collect.MapMaker
-
 import org.apache.spark.annotation.DeveloperApi
 import org.apache.spark.api.python.PythonWorkerFactory
 import org.apache.spark.broadcast.BroadcastManager
@@ -33,9 +31,9 @@ import org.apache.spark.metrics.MetricsSystem
 import org.apache.spark.memory.{MemoryManager, StaticMemoryManager, UnifiedMemoryManager}
 import org.apache.spark.network.BlockTransferService
 import org.apache.spark.network.netty.NettyBlockTransferService
-import org.apache.spark.rpc.{RpcEndpointRef, RpcEndpoint, RpcEnv}
+import org.apache.spark.rpc.{RpcEndpoint, RpcEndpointRef, RpcEnv}
 import org.apache.spark.rpc.akka.AkkaRpcEnv
-import org.apache.spark.scheduler.{OutputCommitCoordinator, LiveListenerBus}
+import org.apache.spark.scheduler.{LiveListenerBus, OutputCommitCoordinator}
 import org.apache.spark.scheduler.OutputCommitCoordinator.OutputCommitCoordinatorEndpoint
 import org.apache.spark.serializer.Serializer
 import org.apache.spark.shuffle.ShuffleManager
@@ -86,7 +84,7 @@ class SparkEnv (
   private var driverTmpDirToDelete: Option[String] = None
 
   private[spark] def stop() {
-
+    logDebug("[bold] stop()")
     if (!isStopped) {
       isStopped = true
       pythonWorkers.values.foreach(_.stop())
@@ -362,12 +360,15 @@ object SparkEnv extends Logging {
       conf, isDriver)
 
     // NB: blockManager is not valid until initialize() is called later.
+    logDebug("create BlockManager")
     val blockManager = new BlockManager(executorId, rpcEnv, blockManagerMaster,
       serializer, conf, memoryManager, mapOutputTracker, shuffleManager,
       blockTransferService, securityManager, numUsableCores)
 
-    val broadcastManager = new BroadcastManager(isDriver, conf, securityManager)
+    logDebug("create BroadcastManager")
+    val broadcastManager = new BroadcastManager(isDriver, conf, securityManager, blockManager)
 
+    logDebug("create CacheManager")
     val cacheManager = new CacheManager(blockManager)
 
     val metricsSystem = if (isDriver) {
